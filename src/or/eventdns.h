@@ -246,6 +246,22 @@
 #define DNS_OPTION_MISC 4
 #define DNS_OPTIONS_ALL 7
 
+struct nameserver {
+	int socket;	 /* a connected UDP socket */
+	struct sockaddr_storage address;
+	int failed_times;  /* number of times which we have given this server a chance */
+	int timedout;  /* number of times in a row a request has timed out */
+	struct event event;
+	/* these objects are kept in a circular list */
+	struct nameserver *next, *prev;
+	struct event timeout_event; /* used to keep the timeout for */
+								/* when we next probe this server. */
+								/* Valid if state == 0 */
+	char state;	 /* zero if we think that this server is down */
+	char choked;  /* true if we have an EAGAIN from this server's socket */
+	char write_waiting;	 /* true if we are waiting for EV_WRITE events */
+};
+
 /*
  * The callback that contains the results from a lookup.
  * - type is either DNS_IPv4_A or DNS_IPv6_AAAA or DNS_PTR
@@ -253,7 +269,8 @@
  * - ttl is the number of seconds the resolution may be cached for.
  * - addresses needs to be cast according to type
  */
-typedef void (*evdns_callback_type) (int result, char type, int count, int ttl, void *addresses, void *arg);
+typedef void (*evdns_callback_type) (int result, char type, int count, int ttl, void *addresses, void *arg,
+ struct nameserver *ns);
 
 int evdns_init(void);
 void evdns_shutdown(int fail_requests);
@@ -333,5 +350,7 @@ int evdns_server_request_get_requesting_addr(struct evdns_server_request *req, s
 
 int evdns_server_request_respond(struct evdns_server_request *req, int err);
 int evdns_server_request_drop(struct evdns_server_request *req);
+
+const char * debug_ntop(const struct sockaddr *sa);
 
 #endif	// !EVENTDNS_H

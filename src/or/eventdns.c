@@ -89,6 +89,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
+#include <event.h>
 #include "eventdns.h"
 
 #ifdef WIN32
@@ -204,22 +205,6 @@ struct reply {
 			char name[HOST_NAME_MAX];
 		} ptr;
 	} data;
-};
-
-struct nameserver {
-	int socket;	 /* a connected UDP socket */
-	struct sockaddr_storage address;
-	int failed_times;  /* number of times which we have given this server a chance */
-	int timedout;  /* number of times in a row a request has timed out */
-	struct event event;
-	/* these objects are kept in a circular list */
-	struct nameserver *next, *prev;
-	struct event timeout_event; /* used to keep the timeout for */
-								/* when we next probe this server. */
-								/* Valid if state == 0 */
-	char state;	 /* zero if we think that this server is down */
-	char choked;  /* true if we have an EAGAIN from this server's socket */
-	char write_waiting;	 /* true if we are waiting for EV_WRITE events */
 };
 
 static struct evdns_request *req_head = NULL, *req_waiting_head = NULL;
@@ -373,7 +358,6 @@ error_is_eagain(int err)
 #define TOLOWER(c) TOR_TOLOWER(c)
 #define TOUPPER(c) TOR_TOUPPER(c)
 
-#ifndef NDEBUG
 static const char *
 debug_ntoa(u32 address)
 {
@@ -386,7 +370,7 @@ debug_ntoa(u32 address)
 			(int)(u8)((a	)&0xff));
 	return buf;
 }
-static const char *
+const char *
 debug_ntop(const struct sockaddr *sa)
 {
 	if (sa->sa_family == AF_INET) {
@@ -402,7 +386,6 @@ debug_ntop(const struct sockaddr *sa)
 	}
 	return "<unknown>";
 }
-#endif
 
 static evdns_debug_log_fn_type evdns_log_fn = NULL;
 
@@ -703,18 +686,18 @@ reply_callback(struct evdns_request *const req, u32 ttl, u32 err, struct reply *
 			req->user_callback(DNS_ERR_NONE, DNS_IPv4_A,
 							   reply->data.a.addrcount, ttl,
 							   reply->data.a.addresses,
-							   req->user_pointer);
+							   req->user_pointer, req->ns);
 		else
-			req->user_callback(err, 0, 0, 0, NULL, req->user_pointer);
+			req->user_callback(err, 0, 0, 0, NULL, req->user_pointer, req->ns);
 		return;
 	case TYPE_PTR:
 		if (reply) {
 			char *name = reply->data.ptr.name;
 			req->user_callback(DNS_ERR_NONE, DNS_PTR, 1, ttl,
-							   &name, req->user_pointer);
+							   &name, req->user_pointer, req->ns);
 		} else {
 			req->user_callback(err, 0, 0, 0, NULL,
-							   req->user_pointer);
+							   req->user_pointer, req->ns);
 		}
 		return;
 	case TYPE_AAAA:
@@ -722,9 +705,9 @@ reply_callback(struct evdns_request *const req, u32 ttl, u32 err, struct reply *
 			req->user_callback(DNS_ERR_NONE, DNS_IPv6_AAAA,
 							   reply->data.aaaa.addrcount, ttl,
 							   reply->data.aaaa.addresses,
-							   req->user_pointer);
+							   req->user_pointer, req->ns);
 		else
-			req->user_callback(err, 0, 0, 0, NULL, req->user_pointer);
+			req->user_callback(err, 0, 0, 0, NULL, req->user_pointer, req->ns);
 		return;
 	}
 	assert(0);
@@ -2078,13 +2061,15 @@ evdns_request_transmit(struct evdns_request *req) {
 }
 
 static void
-nameserver_probe_callback(int result, char type, int count, int ttl, void *addresses, void *arg) {
+nameserver_probe_callback(int result, char type, int count, int ttl, void *addresses, void *arg,
+                struct nameserver *const ns) {
 	struct sockaddr *addr = arg;
 	struct nameserver *server;
 	(void) type;
 	(void) count;
 	(void) ttl;
 	(void) addresses;
+	(void) ns; /* suppress "unused variable" warnings. */
 
 	for (server = server_head; server; server = server->next) {
 		if (sockaddr_eq(addr, (struct sockaddr*) &server->address, 1)) {

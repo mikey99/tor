@@ -1312,7 +1312,7 @@ configure_nameservers(int force)
  */
 static void
 evdns_callback(int result, char type, int count, int ttl, void *addresses,
-               void *arg)
+               void *arg, struct nameserver *const ns)
 {
   char *string_address = arg;
   uint8_t is_reverse = 0;
@@ -1334,8 +1334,11 @@ evdns_callback(int result, char type, int count, int ttl, void *addresses,
       escaped_address = esc_for_log(string_address);
 
       if (answer_is_wildcarded(answer_buf)) {
-        log_debug(LD_EXIT, "eventdns said that %s resolves to ISP-hijacked "
+        log_debug(LD_EXIT, "eventdns %s%ssaid that %s "
+                  "resolves to ISP-hijacked "
                   "address %s; treating as a failure.",
+                  ns ? debug_ntop((struct sockaddr *)&ns->address) : "",
+                  ns ? " " : "",
                   safe_str(escaped_address),
                   escaped_safe_str(answer_buf));
         was_wildcarded = 1;
@@ -1534,7 +1537,7 @@ add_wildcarded_test_address(const char *address)
  * for a (hopefully) nonexistent domain. */
 static void
 evdns_wildcard_check_callback(int result, char type, int count, int ttl,
-                              void *addresses, void *arg)
+              void *addresses, void *arg, struct nameserver *const ns)
 {
   (void)ttl;
   ++n_wildcard_requests;
@@ -1550,10 +1553,12 @@ evdns_wildcard_check_callback(int result, char type, int count, int ttl,
       wildcard_increment_answer(answer_buf);
     }
     log(dns_wildcard_one_notice_given ? LOG_INFO : LOG_NOTICE, LD_EXIT,
-        "Your DNS provider gave an answer for \"%s\", which "
+        "Your DNS provider %s%sgave an answer for \"%s\", which "
         "is not supposed to exist. Apparently they are hijacking "
         "DNS failures. Trying to correct for this. We've noticed %d "
         "possibly bad address%s so far.",
+        ns ? debug_ntop((struct sockaddr *)&ns->address) : "",
+        ns ? " " : "",
         string_address, strmap_size(dns_wildcard_response_count),
         (strmap_size(dns_wildcard_response_count) == 1) ? "" : "es");
     dns_wildcard_one_notice_given = 1;

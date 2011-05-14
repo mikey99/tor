@@ -22,6 +22,7 @@
 /* XXXX023 this implies we want an improved evdns  */
 #include <event2/dns_struct.h>
 #else
+#include <event.h>
 #include "eventdns.h"
 #endif
 
